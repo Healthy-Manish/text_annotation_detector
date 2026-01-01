@@ -6,7 +6,9 @@ import {
   Clock
 } from 'lucide-react';
 
-const ResultsPanel = ({ timeline, regions, status }) => {
+const ResultsPanel = ({ timeline = {}, regions = [], status }) => {
+  const isEmpty = !timeline || Object.keys(timeline).length === 0;
+
   return (
     <div className="flex flex-col h-full bg-neutral-850">
 
@@ -38,15 +40,16 @@ const ResultsPanel = ({ timeline, regions, status }) => {
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto">
 
-        {!timeline || Object.keys(timeline).length === 0 && (
+        {isEmpty && (
           <div className="h-full flex flex-col items-center justify-center text-xs text-gray-500 gap-2">
             <Clock size={28} className="opacity-30" />
             No inference data yet
           </div>
         )}
 
-        {Object.entries(timeline || {}).map(([regionIdx, events]) => {
-          const region = regions[regionIdx];
+        {!isEmpty && Object.entries(timeline).map(([regionIdx, events]) => {
+          const regionIndex = Number(regionIdx);
+          const region = regions[regionIndex];
 
           return (
             <div
@@ -55,29 +58,30 @@ const ResultsPanel = ({ timeline, regions, status }) => {
             >
               {/* Region Header */}
               <div className="mb-2 text-indigo-400 font-semibold">
-                {region?.label || `Region ${Number(regionIdx) + 1}`}
+                {region?.label || `Region ${regionIndex + 1}`}
               </div>
 
               {/* Timeline Entries */}
               <div className="space-y-1">
-                {events.map((e, i) => (
-                  <div
-                    key={i}
-                    className="flex justify-between items-center bg-neutral-900 px-2 py-1 rounded border border-neutral-700"
-                  >
-                    <span className="font-mono text-gray-300">
-                      {new Date(e.timestamp).toLocaleTimeString()}
-                    </span>
-                    <span className="text-gray-200">
-                      {e.text}
-                    </span>
-                  </div>
-                ))}
+                {[...(Array.isArray(events) ? events : [])]
+                  .reverse()
+                  .map((e, i) => (
+                    <div
+                      key={i}
+                      className="flex justify-between items-center bg-neutral-900 px-2 py-1 rounded border border-neutral-700"
+                    >
+                      <span className="font-mono text-gray-300">
+                        {new Date(e.timestamp).toLocaleTimeString()}
+                      </span>
+                      <span className="text-gray-200">
+                        {e.text}
+                      </span>
+                    </div>
+                  ))}
               </div>
             </div>
           );
         })}
-
       </div>
     </div>
   );

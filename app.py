@@ -6,18 +6,28 @@ import numpy as np
 from datetime import datetime
 import json
 import os
+import shutil
 from collections import defaultdict
 
+from models.model import TextDetector   # your real model
+
+# =========================
+# APP SETUP
+# =========================
 app = Flask(__name__)
 CORS(app)
 
-# =========================
-# CONFIG
-# =========================
 OUTPUT_FOLDER = "outputs"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Active video sessions (in-memory)
+# =========================
+# LOAD MODEL ONCE ✅
+# =========================
+text_model = TextDetector()
+
+# =========================
+# IN-MEMORY ACTIVE SESSIONS
+# =========================
 video_sessions = {}
 
 # =========================
@@ -29,24 +39,16 @@ def decode_base64_image(data_url):
     nparr = np.frombuffer(img_bytes, np.uint8)
     return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-def dummy_text_detection_model(region_img):
-    avg = np.mean(region_img)
-    if avg < 85:
-        return "No text detected"
-    elif avg < 170:
-        return "Sample Text A"
-    else:
-        return "Sample Text B"
-
 def draw_annotations(frame, regions, texts):
     annotated = frame.copy()
 
     for idx, r in enumerate(regions):
+        key = str(idx)
         x, y, w, h = map(int, [r["x"], r["y"], r["width"], r["height"]])
-        label = r.get("label", f"Region {idx+1}")
-        text = texts.get(idx, "")
+        label = r.get("label", f"Region {idx + 1}")
+        text = texts.get(key, "")
 
-        cv2.rectangle(annotated, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
         cv2.putText(
             annotated,
             f"{label}: {text}",
@@ -73,13 +75,9 @@ def start_session():
     session_dir = os.path.join(OUTPUT_FOLDER, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
-    video_path = os.path.join(session_dir, "annotated_video.mp4")
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(video_path, fourcc, 5, (1280, 720))
-
     video_sessions[session_id] = {
         "regions": regions,
-        "writer": writer,
+        "writer": None,                # lazy init
         "last_text": {},
         "timeline": defaultdict(list)
     }
@@ -97,28 +95,42 @@ def stream_frame():
     if not session:
         return jsonify({"error": "Session not found"}), 400
 
-    regions = session["regions"]
+    # Create video writer on first frame
+    if session["writer"] is None:
+        h, w = frame.shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        video_path = os.path.join(OUTPUT_FOLDER, session_id, "annotated_video.mp4")
+        session["writer"] = cv2.VideoWriter(video_path, fourcc, 5, (w, h))
+
     texts = {}
+    regions = session["regions"]
 
     for idx, r in enumerate(regions):
+        key = str(idx)
         x, y, w, h = map(int, [r["x"], r["y"], r["width"], r["height"]])
-        roi = frame[y:y+h, x:x+w]
+        roi = frame[y:y + h, x:x + w]
 
-        detected_text = dummy_text_detection_model(roi)
-        texts[idx] = detected_text
+        detected_text = text_model.predict(roi)
+        detected_text = detected_text.strip() if detected_text else ""
 
-        last = session["last_text"].get(idx)
-        if detected_text != last:
-            session["timeline"][idx].append({
+        texts[key] = detected_text
+
+        last = session["last_text"].get(key)
+        if detected_text and detected_text != last:
+            session["timeline"][key].append({
                 "timestamp": datetime.now().isoformat(),
                 "text": detected_text
             })
-            session["last_text"][idx] = detected_text
+            session["last_text"][key] = detected_text
 
     annotated = draw_annotations(frame, regions, texts)
     session["writer"].write(annotated)
 
-    return jsonify({"success": True})
+    return jsonify({
+        "success": True,
+        "detected_texts": texts,
+        "timestamp": datetime.now().isoformat()
+    })
 
 
 @app.route("/stop_session", methods=["POST"])
@@ -129,18 +141,22 @@ def stop_session():
     if not session:
         return jsonify({"error": "Session not found"}), 400
 
-    session["writer"].release()
+    if session["writer"]:
+        session["writer"].release()
 
-    timeline_path = os.path.join(
-        OUTPUT_FOLDER, session_id, "timeline.json"
-    )
-    with open(timeline_path, "w") as f:
+    session_dir = os.path.join(OUTPUT_FOLDER, session_id)
+
+    # Save timeline
+    with open(os.path.join(session_dir, "timeline.json"), "w") as f:
         json.dump(session["timeline"], f, indent=2)
+
+    # Save regions metadata
+    with open(os.path.join(session_dir, "regions.json"), "w") as f:
+        json.dump(session["regions"], f, indent=2)
 
     del video_sessions[session_id]
 
     return jsonify({"success": True})
-
 
 # =========================
 # REPLAY ENDPOINTS
@@ -158,10 +174,20 @@ def get_video(session_id):
 def get_timeline(session_id):
     path = os.path.join(OUTPUT_FOLDER, session_id, "timeline.json")
     if not os.path.exists(path):
-        return jsonify({"timeline": {}})
-
+        return jsonify({})
     with open(path) as f:
         return jsonify(json.load(f))
+
+
+@app.route("/regions/<session_id>")
+def get_regions(session_id):
+    path = os.path.join(OUTPUT_FOLDER, session_id, "regions.json")
+    if not os.path.exists(path):
+        return jsonify([])
+    with open(path) as f:
+        return jsonify(json.load(f))
+
+
 @app.route("/sessions")
 def list_sessions():
     sessions = []
@@ -171,16 +197,23 @@ def list_sessions():
         if not os.path.isdir(session_dir):
             continue
 
-        video_path = os.path.join(session_dir, "annotated_video.mp4")
-        timeline_path = os.path.join(session_dir, "timeline.json")
-
         sessions.append({
             "session_id": session_id,
-            "has_video": os.path.exists(video_path),
-            "has_timeline": os.path.exists(timeline_path)
+            "has_video": os.path.exists(os.path.join(session_dir, "annotated_video.mp4")),
+            "has_timeline": os.path.exists(os.path.join(session_dir, "timeline.json"))
         })
 
     return jsonify(sessions)
+
+
+@app.route("/delete_session/<session_id>", methods=["DELETE"])
+def delete_session(session_id):
+    session_dir = os.path.join(OUTPUT_FOLDER, session_id)
+    if not os.path.exists(session_dir):
+        return jsonify({"error": "Session not found"}), 404
+
+    shutil.rmtree(session_dir)
+    return jsonify({"success": True})
 
 
 # =========================

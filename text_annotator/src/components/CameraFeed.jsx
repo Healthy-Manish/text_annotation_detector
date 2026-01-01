@@ -26,7 +26,12 @@ const CameraFeed = ({
         if (canvasRef.current) {
            canvasRef.current.width = video.videoWidth;
            canvasRef.current.height = video.videoHeight;
-           onCanvasReady({ width: video.videoWidth, height: video.videoHeight });
+           if (typeof onCanvasReady === 'function') {
+            onCanvasReady({
+              width: video.videoWidth,
+              height: video.videoHeight
+            });
+          }
         }
       };
     }
