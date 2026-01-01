@@ -1,15 +1,17 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Camera } from 'lucide-react';
 
-const CameraFeed = ({ 
-  
-  stream, 
-  isCameraActive, 
-  regions, 
-  setRegions, 
+const CameraFeed = ({
+  stream,
+  isCameraActive,
+  regions,
+  setRegions,
   videoRef,
-  onCanvasReady 
+  onCanvasReady,
+  regionsLocked,       
+  replayVideoUrl      
 }) => {
+
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState(null);
@@ -49,7 +51,7 @@ const CameraFeed = ({
   };
 
   const handleMouseDown = (e) => {
-    if (!isCameraActive) return;
+    if (!isCameraActive || regionsLocked) return;
     const coords = getCanvasCoordinates(e);
     setIsDrawing(true);
     setDrawStart(coords);
@@ -114,21 +116,39 @@ const CameraFeed = ({
 
   return (
     <div className="relative bg-black rounded-2xl overflow-hidden shadow-lg aspect-video group">
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        className={`w-full h-full object-cover ${isCameraActive ? 'block' : 'hidden'}`}
-      />
+      {replayVideoUrl ? (
+        /* 🔁 REPLAY MODE */
+        <video
+          src={replayVideoUrl}
+          controls
+          className="absolute inset-0 w-full h-full object-contain"
+        />
+      ) : (
+        /* 🎥 LIVE CAMERA MODE */
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className={`absolute inset-0 w-full h-full object-cover ${
+            isCameraActive ? 'block' : 'hidden'
+          }`}
+        />
+      )}
+
       
-      <canvas
-        ref={canvasRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={() => setIsDrawing(false)}
-        className={`absolute top-0 left-0 w-full h-full cursor-crosshair ${isCameraActive ? 'block' : 'hidden'}`}
-      />
+      {!replayVideoUrl && (
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={() => setIsDrawing(false)}
+          className={`absolute top-0 left-0 w-full h-full cursor-crosshair ${
+            isCameraActive ? 'block' : 'hidden'
+          }`}
+        />
+      )}
+
 
       {!isCameraActive && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 bg-gray-900">
