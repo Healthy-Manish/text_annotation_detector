@@ -15,6 +15,7 @@ const App = () => {
   // =======================
   // STATE
   // =======================
+  const [mode, setMode] = useState('idle');
   const [stream, setStream] = useState(null);
   const [regions, setRegions] = useState([]);
   const [regionsLocked, setRegionsLocked] = useState(false);
@@ -22,8 +23,6 @@ const App = () => {
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
 
-  const [results, setResults] = useState([]);
-  const [stats, setStats] = useState({ totalFrames: 0, uniqueFrames: 0 });
   const [status, setStatus] = useState(null);
 
   const [sessionId, setSessionId] = useState(null);
@@ -51,6 +50,10 @@ const App = () => {
   // CAMERA
   // =======================
   const startCamera = async () => {
+      setTimelineData({});
+      setRegions([]);
+      setActiveRegion(null);
+      setReplayVideoUrl(null);
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { width: 1280, height: 720 }
@@ -68,8 +71,13 @@ const App = () => {
 
   const stopCamera = () => {
     if (stream) stream.getTracks().forEach(t => t.stop());
+    setRegions([]);            // 🔥 CLEAR OLD ANNOTATIONS
+    setActiveRegion(null);
+    setSessionId(null);
     setStream(null);
     setIsCameraActive(false);
+    setTimelineData({});
+    setStatus(null);
     videoRef.current.srcObject = null;
     showStatus('Camera stopped', 'info');
   };
@@ -77,14 +85,22 @@ const App = () => {
   // =======================
   // SESSION CONTROL
   // =======================
-  const startSession = async () => {
-    if (regions.length === 0) {
-      showStatus('Define regions before starting', 'error');
-      return;
-    }
-    const newSessionId = `session_${Date.now()}`;
-    setSessionId(newSessionId);
+const startSession = async () => {
+  if (regions.length === 0) {
+    showStatus('Define regions before starting', 'error');
+    return;
+  }
 
+  // Clear any existing interval
+  if (streamIntervalRef.current) {
+    clearInterval(streamIntervalRef.current);
+  }
+
+  const newSessionId = `session_${Date.now()}`;
+  setSessionId(newSessionId);
+  setTimelineData({});
+
+  try {
     await fetch(`${API_BASE}/start_session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -93,37 +109,73 @@ const App = () => {
 
     setRegionsLocked(true);
     setIsStreaming(true);
-    showStatus('Live feed started', 'success');
 
-    streamIntervalRef.current = setInterval(()=> sendFrame(newSessionId),500); // 2 FPS
-  };
+    // Start new interval
+    streamIntervalRef.current = setInterval(
+      () => sendFrame(newSessionId),
+      500
+    );
 
+    showStatus('Recording started', 'success');
+  } catch (err) {
+    showStatus(`Failed to start session: ${err.message}`, 'error');
+    setSessionId(null);
+    setIsStreaming(false);
+  }
+};
+
+const clearSession = async()=>{
+    setTimelineData({});
+    setStatus(null);
+}
 const stopSession = async () => {
-  // 1. Clear interval immediately to stop sendFrame calls
+  // 1. Clear interval FIRST to stop new requests
   if (streamIntervalRef.current) {
     clearInterval(streamIntervalRef.current);
     streamIntervalRef.current = null;
   }
 
+  // 2. Reset streaming state immediately
+  setIsStreaming(false);
+  setRegionsLocked(false);
+  
+  // 3. Only proceed if we have a valid session
+  if (!sessionId) {
+    showStatus('No active session', 'info');
+    return;
+  }
+
   try {
-    await fetch(`${API_BASE}/stop_session`, {
+    // 4. Send stop request to backend
+    const response = await fetch(`${API_BASE}/stop_session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId })
     });
 
-    // 2. Reset UI States
-    setIsStreaming(false); // This stops the "Processing" spinner
-    setRegionsLocked(false);
-    
-    // 3. Load the final results
-    await loadTimeline();
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    // 5. Reset states on success
+    setRegions([]);
+    setActiveRegion(null);
+    setSessionId(null);
+    setTimelineData({});
+
     showStatus('Session saved successfully', 'success');
   } catch (err) {
-    showStatus('Error stopping session', 'error');
-    setIsStreaming(false); // Ensure it unlocks even on error
+    console.warn('Stop session error (may be expected):', err);
+    showStatus('Session stopped (backend may have reset)', 'warning');
+    
+    // Still reset local state even if server fails
+    setRegions([]);
+    setActiveRegion(null);
+    setSessionId(null);
+    setTimelineData({});
   }
 };
+
 
 
   // =======================
@@ -170,18 +222,31 @@ useEffect(() => {
     .then(res => res.json())
     .then(setSessions);
 }, []);
+
 const loadSession = async (sessionId) => {
+  // 1. Reset live states
+  if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
+  setIsStreaming(false);
+  setRegionsLocked(false);
+  
+  // 2. Set the URL with a Cache Buster (?t=...)
+  // This forces the browser to re-fetch the completed video file
+  const videoUrlWithCacheBuster = `${API_BASE}/video/${sessionId}?t=${new Date().getTime()}`;
+  setReplayVideoUrl(videoUrlWithCacheBuster);
+
   setActiveSession(sessionId);
 
-  // Load video
-  setReplayVideoUrl(`${API_BASE}/video/${sessionId}`);
-
-  // Load timeline
-  const res = await fetch(`${API_BASE}/timeline/${sessionId}`);
-  const timeline = await res.json();
-  setTimelineData(timeline);
-
-  showStatus(`Loaded session ${sessionId}`, 'info');
+  // 3. Load Data
+  try {
+    const [tRes, rRes] = await Promise.all([
+      fetch(`${API_BASE}/timeline/${sessionId}`),
+      fetch(`${API_BASE}/regions/${sessionId}`)
+    ]);
+    setTimelineData(await tRes.json());
+    setRegions(await rRes.json());
+  } catch (err) {
+    console.error("Error loading history:", err);
+  }
 };
 const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
@@ -329,7 +394,7 @@ const updateLiveTimeline = (data) => {
 
                 <ResultsPanel
                     timeline={timelineData}
-                    liveResults = {results}
+                    // liveResults = {results}
                     regions={regions}
                     status={status}
                 />
@@ -341,15 +406,14 @@ const updateLiveTimeline = (data) => {
           
             <ControlPanel
               isCameraActive={isCameraActive}
-              isProcessing={isStreaming}
-              onStart={startCamera}
-              onStop={stopCamera}
-              onCapture={startSession}
-              onClear={stopSession}
-              onHistory={() => setShowHistory(true)}
-              startLabel="Start Live Feed"
-              stopLabel="Stop & Save"
+              isRecording={isStreaming}
+              onStartCamera={startCamera}
+              onStopCamera={stopCamera}
+              onStartRecording={startSession}
+              onStopRecording={stopSession}
+              clearSession = {clearSession}
             />
+
           </div>
 
 

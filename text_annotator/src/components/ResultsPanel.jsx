@@ -15,7 +15,7 @@ const ResultsPanel = ({ timeline = {}, regions = [], status }) => {
       {/* Header */}
       <div className="h-10 flex items-center px-3 border-b border-neutral-700 text-xs text-gray-300">
         <Layers size={12} className="mr-2" />
-        Detection Timeline
+        Annotation Results
       </div>
 
       {/* Status */}

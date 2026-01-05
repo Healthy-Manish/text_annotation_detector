@@ -18,15 +18,18 @@ const CameraFeed = ({
   const [currentDraw, setCurrentDraw] = useState(null);
   const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f7dc6f', '#bb8fce', '#85c1e2'];
 
-  // Handle canvas sizing when video loads
+  /* =========================
+     ✅ Canvas sizing — LIVE ONLY
+     ========================= */
   useEffect(() => {
-    if (isCameraActive && videoRef.current) {
+    if (!replayVideoUrl && isCameraActive && videoRef.current) {
       videoRef.current.onloadedmetadata = () => {
         const video = videoRef.current;
         if (canvasRef.current) {
-           canvasRef.current.width = video.videoWidth;
-           canvasRef.current.height = video.videoHeight;
-           if (typeof onCanvasReady === 'function') {
+          canvasRef.current.width = video.videoWidth;
+          canvasRef.current.height = video.videoHeight;
+
+          if (typeof onCanvasReady === 'function') {
             onCanvasReady({
               width: video.videoWidth,
               height: video.videoHeight
@@ -35,14 +38,16 @@ const CameraFeed = ({
         }
       };
     }
-  }, [isCameraActive, stream, onCanvasReady, videoRef]);
+  }, [isCameraActive, stream, replayVideoUrl, onCanvasReady, videoRef]);
 
-  // Redraw canvas when regions change
+  /* =========================
+     Redraw regions (LIVE ONLY)
+     ========================= */
   useEffect(() => {
-    if (isCameraActive && canvasRef.current) {
+    if (!replayVideoUrl && isCameraActive && canvasRef.current) {
       drawRegions();
     }
-  }, [regions, currentDraw, isCameraActive]);
+  }, [regions, currentDraw, isCameraActive, replayVideoUrl]);
 
   const getCanvasCoordinates = (e) => {
     const canvas = canvasRef.current;
@@ -56,7 +61,7 @@ const CameraFeed = ({
   };
 
   const handleMouseDown = (e) => {
-    if (!isCameraActive || regionsLocked) return;
+    if (!isCameraActive || regionsLocked || replayVideoUrl) return;
     const coords = getCanvasCoordinates(e);
     setIsDrawing(true);
     setDrawStart(coords);
@@ -114,18 +119,26 @@ const CameraFeed = ({
       ctx.strokeStyle = '#ffffff';
       ctx.setLineDash([5, 5]);
       ctx.lineWidth = 2;
-      ctx.strokeRect(currentDraw.x, currentDraw.y, currentDraw.width, currentDraw.height);
+      ctx.strokeRect(
+        currentDraw.x,
+        currentDraw.y,
+        currentDraw.width,
+        currentDraw.height
+      );
       ctx.setLineDash([]);
     }
   };
 
   return (
     <div className="relative bg-black rounded-2xl overflow-hidden shadow-lg aspect-video group">
+
+      {/* 🔁 REPLAY MODE */}
       {replayVideoUrl ? (
-        /* 🔁 REPLAY MODE */
         <video
+          key={replayVideoUrl}        // ✅ FORCE RELOAD
           src={replayVideoUrl}
           controls
+          autoPlay
           className="absolute inset-0 w-full h-full object-contain"
         />
       ) : (
@@ -134,34 +147,35 @@ const CameraFeed = ({
           ref={videoRef}
           autoPlay
           playsInline
+          muted
           className={`absolute inset-0 w-full h-full object-cover ${
             isCameraActive ? 'block' : 'hidden'
           }`}
         />
       )}
 
-      
-      {!replayVideoUrl && (
+      {/* 🟩 CANVAS — LIVE ONLY */}
+      {!replayVideoUrl && isCameraActive && (
         <canvas
           ref={canvasRef}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={() => setIsDrawing(false)}
-          className={`absolute top-0 left-0 w-full h-full cursor-crosshair ${
-            isCameraActive ? 'block' : 'hidden'
-          }`}
+          className="absolute inset-0 w-full h-full cursor-crosshair"
         />
       )}
 
-
-      {!isCameraActive && (
+      {/* 📵 OFFLINE OVERLAY — ONLY WHEN NO REPLAY */}
+      {!isCameraActive && !replayVideoUrl && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 bg-gray-900">
           <div className="p-4 rounded-full bg-gray-800 mb-4 animate-pulse">
             <Camera size={48} className="opacity-50" />
           </div>
           <p className="text-lg font-medium">Camera is offline</p>
-          <p className="text-sm opacity-60">Click "Start Camera" to begin annotating</p>
+          <p className="text-sm opacity-60">
+            Click "Start Camera" to begin annotating
+          </p>
         </div>
       )}
     </div>
