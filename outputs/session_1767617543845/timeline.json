@@ -1,0 +1,46 @@
+{
+  "0": [
+    {
+      "timestamp": "2026-01-05T18:22:24.746096",
+      "text": "Sample Text A"
+    }
+  ],
+  "1": [
+    {
+      "timestamp": "2026-01-05T18:22:24.746487",
+      "text": "Sample Text A"
+    }
+  ],
+  "2": [
+    {
+      "timestamp": "2026-01-05T18:22:24.746766",
+      "text": "Sample Text B"
+    },
+    {
+      "timestamp": "2026-01-05T18:22:25.008383",
+      "text": "Sample Text A"
+    },
+    {
+      "timestamp": "2026-01-05T18:22:26.459585",
+      "text": "Sample Text B"
+    },
+    {
+      "timestamp": "2026-01-05T18:22:26.947394",
+      "text": "Sample Text A"
+    },
+    {
+      "timestamp": "2026-01-05T18:22:27.475112",
+      "text": "Sample Text B"
+    },
+    {
+      "timestamp": "2026-01-05T18:22:28.451994",
+      "text": "Sample Text A"
+    }
+  ],
+  "3": [
+    {
+      "timestamp": "2026-01-05T18:22:24.747145",
+      "text": "Sample Text A"
+    }
+  ]
+}
